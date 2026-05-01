@@ -25,11 +25,13 @@ async function fetchAllStars(token, username) {
   return all;
 }
 
-async function callClaude(system, userMsg) {
+async function callClaude(system, userMsg, apiKey) {
   const res = await fetch(CLAUDE_API, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
     },
     body: JSON.stringify({
@@ -130,6 +132,7 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 export default function App() {
+  const [claudeKey, setClaudeKey]         = useState(() => localStorage.getItem('claudeKey') || '');
   const [username, setUsername]           = useState('');
   const [token, setToken]                 = useState('');
   const [stars, setStars]                 = useState([]);
@@ -186,7 +189,7 @@ export default function App() {
         '\n\nStars list (' + snapshot.length + ' total, from_stars MUST only come from here):\n' +
         JSON.stringify(snapshot);
 
-      const raw = await callClaude(SYSTEM_PROMPT, userMsg);
+      const raw = await callClaude(SYSTEM_PROMPT, userMsg, claudeKey.trim());
       const match = raw.match(/\{[\s\S]*\}/);
       if (!match) throw new Error('AI returned unexpected format, please retry');
       const parsed = JSON.parse(match[0]);
@@ -198,7 +201,7 @@ export default function App() {
     } finally {
       setSearching(false);
     }
-  }, [query, stars, starsLoaded]);
+  }, [query, stars, starsLoaded, claudeKey]);
 
   const hasResults = starResults.length > 0 || externalResults.length > 0;
 
@@ -235,6 +238,32 @@ export default function App() {
       </div>
 
       <div style={{ maxWidth: 820, margin: '0 auto', padding: '28px 20px 0' }}>
+
+        <section style={{ marginBottom: 28, padding: '14px 18px', background: 'rgba(0,255,70,0.03)', border: '1px solid #1a3a22', borderRadius: 10 }}>
+          <div style={{ ...lbl, marginBottom: 8 }}>⚙ AI 设置 · Claude API Key</div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              type="password"
+              placeholder="sk-ant-api03-..."
+              value={claudeKey}
+              onChange={(e) => {
+                setClaudeKey(e.target.value);
+                localStorage.setItem('claudeKey', e.target.value);
+              }}
+              style={{ ...inp, flex: 1, minWidth: 260 }}
+            />
+            {claudeKey && (
+              <span style={{ fontSize: 11, color: '#4ade80' }}>✓ 已设置</span>
+            )}
+          </div>
+          <div style={{ marginTop: 6, fontSize: 11, color: '#3a5a45' }}>
+            前往{' '}
+            <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" style={{ color: '#2a9d3a' }}>
+              console.anthropic.com
+            </a>{' '}
+            获取 API Key。Key 仅保存在本地浏览器中。
+          </div>
+        </section>
 
         <section style={{ marginBottom: 28 }}>
           <div style={lbl}>STEP 01 · 连接 GitHub</div>
@@ -295,8 +324,8 @@ export default function App() {
             }}
           />
           <div style={{ marginTop: 10, display: 'flex', gap: 10, alignItems: 'center' }}>
-            <button onClick={search} disabled={!starsLoaded || !query.trim() || searching} style={{ ...bt(!starsLoaded || !query.trim() || searching), padding: '10px 28px' }}>
-              {searching ? '🔍 AI 分析中…' : '🔍 搜索匹配项目'}
+            <button onClick={search} disabled={!starsLoaded || !query.trim() || searching || !claudeKey.trim()} style={{ ...bt(!starsLoaded || !query.trim() || searching || !claudeKey.trim()), padding: '10px 28px' }}>
+              {searching ? '🔍 AI 分析中…' : !claudeKey.trim() ? '请先设置 API Key' : '🔍 搜索匹配项目'}
             </button>
             <span style={{ fontSize: 11, color: '#3a5a45' }}>⌘ + Enter 快捷提交</span>
           </div>
