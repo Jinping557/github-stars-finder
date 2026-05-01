@@ -1,7 +1,5 @@
 import { useState, useCallback } from 'react';
 
-const CLAUDE_API = 'https://api.anthropic.com/v1/messages';
-
 async function fetchAllStars(token, username) {
   let page = 1;
   const all = [];
@@ -25,30 +23,29 @@ async function fetchAllStars(token, username) {
   return all;
 }
 
-async function callClaude(system, userMsg, apiKey) {
-  const res = await fetch(CLAUDE_API, {
+async function callLLM(system, userMsg, { apiUrl, apiKey, model }) {
+  const base = apiUrl.replace(/\/+$/, '');
+  const endpoint = base.endsWith('/chat/completions') ? base : base + '/chat/completions';
+  const res = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
+      'Authorization': 'Bearer ' + apiKey,
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model,
       max_tokens: 4000,
-      system: system,
-      messages: [{ role: 'user', content: userMsg }],
-      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: userMsg },
+      ],
     }),
   });
   const data = await res.json();
-  if (data.error) throw new Error(data.error.message);
-  return data.content
-    .filter((b) => b.type === 'text')
-    .map((b) => b.text)
-    .join('\n')
-    .trim();
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) throw new Error('API 返回了空内容，请检查模型名称是否正确');
+  return content.trim();
 }
 
 function Tag({ label }) {
@@ -132,7 +129,9 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 export default function App() {
-  const [claudeKey, setClaudeKey]         = useState(() => localStorage.getItem('claudeKey') || '');
+  const [apiUrl, setApiUrl]   = useState(() => localStorage.getItem('llm_apiUrl')   || 'https://api.openai.com/v1');
+  const [apiKey, setApiKey]   = useState(() => localStorage.getItem('llm_apiKey')   || '');
+  const [apiModel, setApiModel] = useState(() => localStorage.getItem('llm_apiModel') || 'gpt-4o');
   const [username, setUsername]           = useState('');
   const [token, setToken]                 = useState('');
   const [stars, setStars]                 = useState([]);
@@ -189,7 +188,7 @@ export default function App() {
         '\n\nStars list (' + snapshot.length + ' total, from_stars MUST only come from here):\n' +
         JSON.stringify(snapshot);
 
-      const raw = await callClaude(SYSTEM_PROMPT, userMsg, claudeKey.trim());
+      const raw = await callLLM(SYSTEM_PROMPT, userMsg, { apiUrl: apiUrl.trim(), apiKey: apiKey.trim(), model: apiModel.trim() });
       const match = raw.match(/\{[\s\S]*\}/);
       if (!match) throw new Error('AI returned unexpected format, please retry');
       const parsed = JSON.parse(match[0]);
@@ -201,7 +200,7 @@ export default function App() {
     } finally {
       setSearching(false);
     }
-  }, [query, stars, starsLoaded, claudeKey]);
+  }, [query, stars, starsLoaded, apiUrl, apiKey, apiModel]);
 
   const hasResults = starResults.length > 0 || externalResults.length > 0;
 
@@ -240,28 +239,41 @@ export default function App() {
       <div style={{ maxWidth: 820, margin: '0 auto', padding: '28px 20px 0' }}>
 
         <section style={{ marginBottom: 28, padding: '14px 18px', background: 'rgba(0,255,70,0.03)', border: '1px solid #1a3a22', borderRadius: 10 }}>
-          <div style={{ ...lbl, marginBottom: 8 }}>⚙ AI 设置 · Claude API Key</div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <input
-              type="password"
-              placeholder="sk-ant-api03-..."
-              value={claudeKey}
-              onChange={(e) => {
-                setClaudeKey(e.target.value);
-                localStorage.setItem('claudeKey', e.target.value);
-              }}
-              style={{ ...inp, flex: 1, minWidth: 260 }}
-            />
-            {claudeKey && (
-              <span style={{ fontSize: 11, color: '#4ade80' }}>✓ 已设置</span>
-            )}
+          <div style={{ ...lbl, marginBottom: 12 }}>⚙ AI 设置 · 支持任意 OpenAI 兼容接口</div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 2, minWidth: 200 }}>
+              <label style={{ fontSize: 10, color: '#4a7a55', letterSpacing: 1 }}>API 地址</label>
+              <input
+                type="text"
+                placeholder="https://api.openai.com/v1"
+                value={apiUrl}
+                onChange={(e) => { setApiUrl(e.target.value); localStorage.setItem('llm_apiUrl', e.target.value); }}
+                style={inp}
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 2, minWidth: 200 }}>
+              <label style={{ fontSize: 10, color: '#4a7a55', letterSpacing: 1 }}>API Key</label>
+              <input
+                type="password"
+                placeholder="sk-..."
+                value={apiKey}
+                onChange={(e) => { setApiKey(e.target.value); localStorage.setItem('llm_apiKey', e.target.value); }}
+                style={inp}
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 130 }}>
+              <label style={{ fontSize: 10, color: '#4a7a55', letterSpacing: 1 }}>模型名称</label>
+              <input
+                type="text"
+                placeholder="gpt-4o"
+                value={apiModel}
+                onChange={(e) => { setApiModel(e.target.value); localStorage.setItem('llm_apiModel', e.target.value); }}
+                style={inp}
+              />
+            </div>
           </div>
-          <div style={{ marginTop: 6, fontSize: 11, color: '#3a5a45' }}>
-            前往{' '}
-            <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer" style={{ color: '#2a9d3a' }}>
-              console.anthropic.com
-            </a>{' '}
-            获取 API Key。Key 仅保存在本地浏览器中。
+          <div style={{ marginTop: 8, fontSize: 11, color: '#3a5a45' }}>
+            支持 OpenAI / DeepSeek / Qwen / 讯飞 / 本地 Ollama 等兼容 OpenAI 格式的接口。设置保存在本地浏览器。
           </div>
         </section>
 
@@ -324,8 +336,8 @@ export default function App() {
             }}
           />
           <div style={{ marginTop: 10, display: 'flex', gap: 10, alignItems: 'center' }}>
-            <button onClick={search} disabled={!starsLoaded || !query.trim() || searching || !claudeKey.trim()} style={{ ...bt(!starsLoaded || !query.trim() || searching || !claudeKey.trim()), padding: '10px 28px' }}>
-              {searching ? '🔍 AI 分析中…' : !claudeKey.trim() ? '请先设置 API Key' : '🔍 搜索匹配项目'}
+            <button onClick={search} disabled={!starsLoaded || !query.trim() || searching || !apiKey.trim() || !apiUrl.trim() || !apiModel.trim()} style={{ ...bt(!starsLoaded || !query.trim() || searching || !apiKey.trim() || !apiUrl.trim() || !apiModel.trim()), padding: '10px 28px' }}>
+              {searching ? '🔍 AI 分析中…' : !apiKey.trim() ? '请先设置 API Key' : '🔍 搜索匹配项目'}
             </button>
             <span style={{ fontSize: 11, color: '#3a5a45' }}>⌘ + Enter 快捷提交</span>
           </div>
