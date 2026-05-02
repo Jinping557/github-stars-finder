@@ -1,16 +1,36 @@
-# React + Vite
+# GitHub Stars Finder
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+[![Live Demo](https://img.shields.io/badge/demo-live-brightgreen?style=flat-square&logo=github)](https://jinping557.github.io/github-stars-finder/)
 
-Currently, two official plugins are available:
+An AI-powered tool to search your GitHub starred repositories and discover new ones. Connect your GitHub account, describe what you're looking for in plain language, and the app uses any OpenAI-compatible LLM to surface the most relevant projects from your Stars — plus suggest new ones you haven't starred yet.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Live Demo
 
-## React Compiler
+**https://jinping557.github.io/github-stars-finder/**
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Features
 
-## Expanding the ESLint configuration
+- Load all starred repositories for any GitHub user (handles pagination automatically)
+- Natural-language search powered by any OpenAI-compatible API (OpenAI, DeepSeek, Qwen, Ollama, etc.)
+- Results split into two lists: matching repos from your Stars, and new AI-discovered repos
+- API settings (URL, key, model) persisted in browser localStorage
+- Works without a GitHub token for public accounts (subject to GitHub's 60 req/h rate limit)
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Usage
+
+1. Enter your LLM API endpoint and key (settings are saved locally in your browser)
+2. Enter a GitHub username and optionally a Personal Access Token
+3. Click **Load Stars** to fetch all starred repositories
+4. Describe your requirement and click **Search**
+
+## Development
+
+```bash
+npm install
+npm run dev      # Start dev server at http://localhost:5000
+npm run build    # Production build → dist/
+npm run preview  # Serve the production build locally
+npm run lint     # Run ESLint
+```
+
+No test framework is configured. The entire application logic lives in `src/App.jsx`.
