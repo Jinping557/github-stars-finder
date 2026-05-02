@@ -153,7 +153,9 @@ export default function App() {
   const [provider, setProvider] = useState(() => localStorage.getItem('llm_provider') || 'openai');
   const [apiUrl, setApiUrl]   = useState(() => localStorage.getItem('llm_apiUrl')   || 'https://api.openai.com/v1');
   const [apiKey, setApiKey]   = useState(() => localStorage.getItem('llm_apiKey')   || '');
-  const [apiModel, setApiModel] = useState(() => localStorage.getItem('llm_apiModel') || 'gpt-4o');
+  const [apiModel, setApiModel] = useState(() => localStorage.getItem('llm_apiModel') || '');
+  const [testStatus, setTestStatus] = useState(null);
+  const [testMsg, setTestMsg]       = useState('');
   const [username, setUsername] = useState(() => localStorage.getItem('gh_username') || '');
   const [token, setToken]       = useState(() => localStorage.getItem('gh_token')    || '');
   const [stars, setStars]                 = useState([]);
@@ -171,26 +173,17 @@ export default function App() {
   const switchProvider = useCallback((p) => {
     setProvider(p);
     localStorage.setItem('llm_provider', p);
-    if (p === 'anthropic') {
-      const url = 'https://api.anthropic.com/v1';
-      setApiUrl(url);
-      localStorage.setItem('llm_apiUrl', url);
-      if (!apiModel.startsWith('claude-')) {
-        const m = 'claude-sonnet-4-6';
-        setApiModel(m);
-        localStorage.setItem('llm_apiModel', m);
-      }
-    } else {
-      const url = 'https://api.openai.com/v1';
-      setApiUrl(url);
-      localStorage.setItem('llm_apiUrl', url);
-      if (apiModel.startsWith('claude-')) {
-        const m = 'gpt-4o';
-        setApiModel(m);
-        localStorage.setItem('llm_apiModel', m);
-      }
-    }
-  }, [apiModel]);
+    const url = p === 'anthropic' ? 'https://api.anthropic.com/v1' : 'https://api.openai.com/v1';
+    setApiUrl(url);
+    localStorage.setItem('llm_apiUrl', url);
+    setApiModel(old => {
+      const m = ['gpt-4o', 'claude-sonnet-4-6'].includes(old) ? '' : old;
+      localStorage.setItem('llm_apiModel', m);
+      return m;
+    });
+    setTestStatus(null);
+    setTestMsg('');
+  }, []);
 
   const loadStars = useCallback(async () => {
     if (!username.trim()) return;
@@ -211,6 +204,45 @@ export default function App() {
       setLoadingStars(false);
     }
   }, [username, token]);
+
+  const testApiConnection = useCallback(async () => {
+    setTestStatus('testing');
+    setTestMsg('');
+    const effModel = apiModel.trim() || (provider === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o');
+    try {
+      if (provider === 'anthropic') {
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: effModel,
+            max_tokens: 1,
+            messages: [{ role: 'user', content: 'hi' }],
+          }),
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error.message || 'API error');
+      } else {
+        const base = apiUrl.replace(/\/+$/, '');
+        const res = await fetch(base + '/models', {
+          headers: { Authorization: 'Bearer ' + apiKey },
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error((data.error && data.error.message) || 'HTTP ' + res.status);
+        }
+      }
+      setTestStatus('ok');
+      setTestMsg('连接成功');
+    } catch (e) {
+      setTestStatus('error');
+      setTestMsg(e.message || '连接失败');
+    }
+  }, [provider, apiUrl, apiKey, apiModel]);
 
   const search = useCallback(async () => {
     if (!query.trim() || !starsLoaded) return;
@@ -234,7 +266,8 @@ export default function App() {
         '\n\nStars list (' + snapshot.length + ' total, from_stars MUST only come from here):\n' +
         JSON.stringify(snapshot);
 
-      const raw = await callLLM(SYSTEM_PROMPT, userMsg, { apiUrl: apiUrl.trim(), apiKey: apiKey.trim(), model: apiModel.trim(), provider });
+      const effModel = apiModel.trim() || (provider === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o');
+      const raw = await callLLM(SYSTEM_PROMPT, userMsg, { apiUrl: apiUrl.trim(), apiKey: apiKey.trim(), model: effModel, provider });
       const match = raw.match(/\{[\s\S]*\}/);
       if (!match) throw new Error('AI returned unexpected format, please retry');
       const parsed = JSON.parse(match[0]);
@@ -315,8 +348,8 @@ export default function App() {
                   type="text"
                   placeholder="https://api.openai.com/v1"
                   value={apiUrl}
-                  onChange={(e) => { setApiUrl(e.target.value); localStorage.setItem('llm_apiUrl', e.target.value); }}
-                  style={inp}
+                  onChange={(e) => { setApiUrl(e.target.value); localStorage.setItem('llm_apiUrl', e.target.value); setTestStatus(null); }}
+                  style={{ ...inp, flex: 1 }}
                 />
               </div>
             )}
@@ -326,7 +359,7 @@ export default function App() {
                 type="password"
                 placeholder={provider === 'anthropic' ? 'sk-ant-...' : 'sk-...'}
                 value={apiKey}
-                onChange={(e) => { setApiKey(e.target.value); localStorage.setItem('llm_apiKey', e.target.value); }}
+                onChange={(e) => { setApiKey(e.target.value); localStorage.setItem('llm_apiKey', e.target.value); setTestStatus(null); }}
                 style={inp}
               />
             </div>
@@ -340,6 +373,17 @@ export default function App() {
                 style={inp}
               />
             </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 10 }}>
+            <button
+              onClick={testApiConnection}
+              disabled={testStatus === 'testing' || !apiKey.trim()}
+              style={bt(testStatus === 'testing' || !apiKey.trim())}
+            >
+              {testStatus === 'testing' ? '测试中…' : '测试连接'}
+            </button>
+            {testStatus === 'ok'    && <span style={{ color: '#4ade80', fontSize: 12 }}>✓ {testMsg}</span>}
+            {testStatus === 'error' && <span style={{ color: '#f87171', fontSize: 12 }}>✗ {testMsg}</span>}
           </div>
           <div style={{ marginTop: 8, fontSize: 11, color: '#3a5a45' }}>
             {provider === 'anthropic'
@@ -407,7 +451,7 @@ export default function App() {
             }}
           />
           <div style={{ marginTop: 10, display: 'flex', gap: 10, alignItems: 'center' }}>
-            <button onClick={search} disabled={!starsLoaded || !query.trim() || searching || !apiKey.trim() || !apiUrl.trim() || !apiModel.trim()} style={{ ...bt(!starsLoaded || !query.trim() || searching || !apiKey.trim() || !apiUrl.trim() || !apiModel.trim()), padding: '10px 28px' }}>
+            <button onClick={search} disabled={!starsLoaded || !query.trim() || searching || !apiKey.trim() || !apiUrl.trim()} style={{ ...bt(!starsLoaded || !query.trim() || searching || !apiKey.trim() || !apiUrl.trim()), padding: '10px 28px' }}>
               {searching ? '🔍 AI 分析中…' : !apiKey.trim() ? '请先设置 API Key' : '🔍 搜索匹配项目'}
             </button>
             <span style={{ fontSize: 11, color: '#3a5a45' }}>⌘ + Enter 快捷提交</span>
