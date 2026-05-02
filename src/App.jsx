@@ -23,7 +23,28 @@ async function fetchAllStars(token, username) {
   return all;
 }
 
-async function callLLM(system, userMsg, { apiUrl, apiKey, model }) {
+async function callLLM(system, userMsg, { apiUrl, apiKey, model, provider }) {
+  if (provider === 'anthropic') {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 4000,
+        system,
+        messages: [{ role: 'user', content: userMsg }],
+      }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+    const content = data.content?.[0]?.text;
+    if (!content) throw new Error('API 返回了空内容，请检查模型名称是否正确');
+    return content.trim();
+  }
   const base = apiUrl.replace(/\/+$/, '');
   const endpoint = base.endsWith('/chat/completions') ? base : base + '/chat/completions';
   const res = await fetch(endpoint, {
@@ -129,11 +150,12 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 export default function App() {
+  const [provider, setProvider] = useState(() => localStorage.getItem('llm_provider') || 'openai');
   const [apiUrl, setApiUrl]   = useState(() => localStorage.getItem('llm_apiUrl')   || 'https://api.openai.com/v1');
   const [apiKey, setApiKey]   = useState(() => localStorage.getItem('llm_apiKey')   || '');
   const [apiModel, setApiModel] = useState(() => localStorage.getItem('llm_apiModel') || 'gpt-4o');
-  const [username, setUsername]           = useState('');
-  const [token, setToken]                 = useState('');
+  const [username, setUsername] = useState(() => localStorage.getItem('gh_username') || '');
+  const [token, setToken]       = useState(() => localStorage.getItem('gh_token')    || '');
   const [stars, setStars]                 = useState([]);
   const [starsLoaded, setStarsLoaded]     = useState(false);
   const [loadingStars, setLoadingStars]   = useState(false);
@@ -145,6 +167,30 @@ export default function App() {
   const [externalResults, setExternalResults]   = useState([]);
   const [summary, setSummary]                   = useState('');
   const [searchError, setSearchError]           = useState('');
+
+  const switchProvider = useCallback((p) => {
+    setProvider(p);
+    localStorage.setItem('llm_provider', p);
+    if (p === 'anthropic') {
+      const url = 'https://api.anthropic.com/v1';
+      setApiUrl(url);
+      localStorage.setItem('llm_apiUrl', url);
+      if (!apiModel.startsWith('claude-')) {
+        const m = 'claude-sonnet-4-6';
+        setApiModel(m);
+        localStorage.setItem('llm_apiModel', m);
+      }
+    } else {
+      const url = 'https://api.openai.com/v1';
+      setApiUrl(url);
+      localStorage.setItem('llm_apiUrl', url);
+      if (apiModel.startsWith('claude-')) {
+        const m = 'gpt-4o';
+        setApiModel(m);
+        localStorage.setItem('llm_apiModel', m);
+      }
+    }
+  }, [apiModel]);
 
   const loadStars = useCallback(async () => {
     if (!username.trim()) return;
@@ -188,7 +234,7 @@ export default function App() {
         '\n\nStars list (' + snapshot.length + ' total, from_stars MUST only come from here):\n' +
         JSON.stringify(snapshot);
 
-      const raw = await callLLM(SYSTEM_PROMPT, userMsg, { apiUrl: apiUrl.trim(), apiKey: apiKey.trim(), model: apiModel.trim() });
+      const raw = await callLLM(SYSTEM_PROMPT, userMsg, { apiUrl: apiUrl.trim(), apiKey: apiKey.trim(), model: apiModel.trim(), provider });
       const match = raw.match(/\{[\s\S]*\}/);
       if (!match) throw new Error('AI returned unexpected format, please retry');
       const parsed = JSON.parse(match[0]);
@@ -200,7 +246,7 @@ export default function App() {
     } finally {
       setSearching(false);
     }
-  }, [query, stars, starsLoaded, apiUrl, apiKey, apiModel]);
+  }, [query, stars, starsLoaded, apiUrl, apiKey, apiModel, provider]);
 
   const hasResults = starResults.length > 0 || externalResults.length > 0;
 
@@ -239,33 +285,56 @@ export default function App() {
       <div style={{ maxWidth: 820, margin: '0 auto', padding: '28px 20px 0' }}>
 
         <section style={{ marginBottom: 28, padding: '14px 18px', background: 'rgba(0,255,70,0.03)', border: '1px solid #1a3a22', borderRadius: 10 }}>
-          <div style={{ ...lbl, marginBottom: 12 }}>⚙ AI 设置 · 支持任意 OpenAI 兼容接口</div>
+          <div style={{ ...lbl, marginBottom: 10 }}>⚙ AI 设置</div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+            {[
+              { key: 'openai', label: 'OpenAI 兼容' },
+              { key: 'anthropic', label: 'Claude (Anthropic)' },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => switchProvider(key)}
+                style={{
+                  padding: '5px 14px', fontSize: 11, borderRadius: 6, cursor: 'pointer',
+                  fontFamily: 'Courier New, monospace', fontWeight: 700, letterSpacing: 0.5,
+                  border: '1px solid ' + (provider === key ? '#2a9d3a' : '#1a3a22'),
+                  background: provider === key ? '#1a4a25' : '#0d1f13',
+                  color: provider === key ? '#4ade80' : '#4a7a55',
+                  transition: 'all .15s',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 2, minWidth: 200 }}>
-              <label style={{ fontSize: 10, color: '#4a7a55', letterSpacing: 1 }}>API 地址</label>
-              <input
-                type="text"
-                placeholder="https://api.openai.com/v1"
-                value={apiUrl}
-                onChange={(e) => { setApiUrl(e.target.value); localStorage.setItem('llm_apiUrl', e.target.value); }}
-                style={inp}
-              />
-            </div>
+            {provider === 'openai' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 2, minWidth: 200 }}>
+                <label style={{ fontSize: 10, color: '#4a7a55', letterSpacing: 1 }}>API 地址</label>
+                <input
+                  type="text"
+                  placeholder="https://api.openai.com/v1"
+                  value={apiUrl}
+                  onChange={(e) => { setApiUrl(e.target.value); localStorage.setItem('llm_apiUrl', e.target.value); }}
+                  style={inp}
+                />
+              </div>
+            )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 2, minWidth: 200 }}>
               <label style={{ fontSize: 10, color: '#4a7a55', letterSpacing: 1 }}>API Key</label>
               <input
                 type="password"
-                placeholder="sk-..."
+                placeholder={provider === 'anthropic' ? 'sk-ant-...' : 'sk-...'}
                 value={apiKey}
                 onChange={(e) => { setApiKey(e.target.value); localStorage.setItem('llm_apiKey', e.target.value); }}
                 style={inp}
               />
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 130 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minWidth: 160 }}>
               <label style={{ fontSize: 10, color: '#4a7a55', letterSpacing: 1 }}>模型名称</label>
               <input
                 type="text"
-                placeholder="gpt-4o"
+                placeholder={provider === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o'}
                 value={apiModel}
                 onChange={(e) => { setApiModel(e.target.value); localStorage.setItem('llm_apiModel', e.target.value); }}
                 style={inp}
@@ -273,7 +342,9 @@ export default function App() {
             </div>
           </div>
           <div style={{ marginTop: 8, fontSize: 11, color: '#3a5a45' }}>
-            支持 OpenAI / DeepSeek / Qwen / 讯飞 / 本地 Ollama 等兼容 OpenAI 格式的接口。设置保存在本地浏览器。
+            {provider === 'anthropic'
+              ? '使用 Anthropic 官方 API · 可选模型：claude-opus-4-7 / claude-sonnet-4-6 / claude-haiku-4-5。设置保存在本地浏览器。'
+              : '支持 OpenAI / DeepSeek / Qwen / 讯飞 / 本地 Ollama 等兼容 OpenAI 格式的接口。设置保存在本地浏览器。'}
           </div>
         </section>
 
@@ -284,7 +355,7 @@ export default function App() {
               type="text"
               placeholder="GitHub 用户名"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(e) => { setUsername(e.target.value); localStorage.setItem('gh_username', e.target.value); }}
               onKeyDown={(e) => e.key === 'Enter' && loadStars()}
               style={{ ...inp, flex: 1, minWidth: 140 }}
             />
@@ -292,7 +363,7 @@ export default function App() {
               type="password"
               placeholder="Personal Access Token（可选）"
               value={token}
-              onChange={(e) => setToken(e.target.value)}
+              onChange={(e) => { setToken(e.target.value); localStorage.setItem('gh_token', e.target.value); }}
               onKeyDown={(e) => e.key === 'Enter' && loadStars()}
               style={{ ...inp, flex: 2, minWidth: 200 }}
             />
@@ -309,7 +380,7 @@ export default function App() {
             </div>
           )}
           <div style={{ marginTop: 6, fontSize: 11, color: '#3a5a45' }}>
-            Token 仅在浏览器本地使用。前往{' '}
+            用户名和 Token 保存在本地浏览器，仅用于调用 GitHub API。前往{' '}
             <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer" style={{ color: '#2a9d3a' }}>
               github.com/settings/tokens
             </a>{' '}
